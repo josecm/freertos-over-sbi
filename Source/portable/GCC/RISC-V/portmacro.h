@@ -43,6 +43,12 @@ extern "C" {
  *-----------------------------------------------------------
  */
 
+#define configSBI 2
+
+#if (configSBI != 0)
+#include <sbi.h>
+#endif
+
 /* Type definitions. */
 #if __riscv_xlen == 64
 	#define portSTACK_TYPE			uint64_t
@@ -91,7 +97,11 @@ not need to be guarded with a critical section. */
 
 /* Scheduler utilities. */
 extern void vTaskSwitchContext( void );
+#if (configSBI != 0)
+#define portYIELD() sbi_send_ipi(0x1, 0);
+#else
 #define portYIELD() __asm volatile( "ecall" );
+#endif
 #define portEND_SWITCHING_ISR( xSwitchRequired ) if( xSwitchRequired ) vTaskSwitchContext()
 #define portYIELD_FROM_ISR( x ) portEND_SWITCHING_ISR( x )
 /*-----------------------------------------------------------*/
@@ -104,8 +114,8 @@ extern void vTaskExitCritical( void );
 
 #define portSET_INTERRUPT_MASK_FROM_ISR() 0
 #define portCLEAR_INTERRUPT_MASK_FROM_ISR( uxSavedStatusValue ) ( void ) uxSavedStatusValue
-#define portDISABLE_INTERRUPTS()	__asm volatile( "csrc mstatus, 8" )
-#define portENABLE_INTERRUPTS()		__asm volatile( "csrs mstatus, 8" )
+#define portDISABLE_INTERRUPTS()	__asm volatile( "csrc sstatus, 2" )
+#define portENABLE_INTERRUPTS()		__asm volatile( "csrs sstatus, 2" )
 #define portENTER_CRITICAL()	vTaskEnterCritical()
 #define portEXIT_CRITICAL()		vTaskExitCritical()
 

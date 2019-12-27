@@ -41,6 +41,10 @@
 	#warning configCLINT_BASE_ADDRESS must be defined in FreeRTOSConfig.h.  If the target chip includes a Core Local Interrupter (CLINT) then set configCLINT_BASE_ADDRESS to the CLINT base address.  Otherwise set configCLINT_BASE_ADDRESS to 0.
 #endif
 
+#if (configSBI != 0)
+#include <sbi.h>
+#endif
+
 /* Let the user override the pre-loading of the initial LR with the address of
 prvTaskExitError() in case it messes up unwinding of the stack in the
 debugger. */
@@ -136,6 +140,11 @@ task stack, not the ISR stack). */
 		ullNextTime += ( uint64_t ) uxTimerIncrementsForOneTick;
 	}
 
+#elif (configSBI != 0)
+    void vPortSetupTimerInterrupt(){
+        sbi_set_timer(uxTimerIncrementsForOneTick);
+    }
+
 #endif /* ( configCLINT_BASE_ADDRESS != 0 ) */
 /*-----------------------------------------------------------*/
 
@@ -145,12 +154,12 @@ extern void xPortStartFirstTask( void );
 
 	#if( configASSERT_DEFINED == 1 )
 	{
-		volatile uint32_t mtvec = 0;
+		volatile uint32_t stvec = 0;
 
-		/* Check the least significant two bits of mtvec are 00 - indicating
+		/* Check the least significant two bits of stvec are 00 - indicating
 		single vector mode. */
-		__asm volatile( "csrr %0, mtvec" : "=r"( mtvec ) );
-		configASSERT( ( mtvec & 0x03UL ) == 0 );
+		__asm volatile( "csrr %0, stvec" : "=r"( stvec ) );
+		configASSERT( ( stvec & 0x03UL ) == 0 );
 
 		/* Check alignment of the interrupt stack - which is the same as the
 		stack that was being used by main() prior to the scheduler being
@@ -170,14 +179,18 @@ extern void xPortStartFirstTask( void );
 	configure whichever clock is to be used to generate the tick interrupt. */
 	vPortSetupTimerInterrupt();
 
-	#if( configCLINT_BASE_ADDRESS != 0 )
+	#if( configCLINT_BASE_ADDRESS != 0)
 	{
 		/* Enable mtime and external interrupts.  1<<7 for timer interrupt, 1<<11
 		for external interrupt.  _RB_ What happens here when mtime is not present as
 		with pulpino? */
 		__asm volatile( "csrs mie, %0" :: "r"(0x880) );
 	}
-	#else
+	#elif (configSBI != 0)
+    {
+        __asm volatile( "csrs sie, %0" :: "r"(0x222) );
+    }
+    #else
 	{
 		/* Enable external interrupts. */
 		__asm volatile( "csrs mie, %0" :: "r"(0x800) );

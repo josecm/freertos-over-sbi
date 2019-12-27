@@ -23,6 +23,7 @@ typedef uint16_t u16;
 #define VIRT_UART_SHIFTREG_ADDR		1843200
 
 void uart8250_enable_rx_int();
+void uart8250_interrupt_handler();
 
 void uart8250_putc(char ch);
 

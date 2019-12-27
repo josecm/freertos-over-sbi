@@ -135,7 +135,7 @@ freertos_risc_v_trap_handler:
 	store_x x30, 27 * portWORD_SIZE( sp )
 	store_x x31, 28 * portWORD_SIZE( sp )
 
-	csrr t0, mstatus					/* Required for MPIE bit. */
+	csrr t0, sstatus					/* Required for MPIE bit. */
 	store_x t0, 29 * portWORD_SIZE( sp )
 
 	portasmSAVE_ADDITIONAL_REGISTERS	/* Defined in freertos_risc_v_chip_specific_extensions.h to save any registers unique to the RISC-V implementation. */
@@ -143,19 +143,19 @@ freertos_risc_v_trap_handler:
 	load_x  t0, pxCurrentTCB			/* Load pxCurrentTCB. */
 	store_x  sp, 0( t0 )				/* Write sp to first TCB member. */
 
-	csrr a0, mcause
-	csrr a1, mepc
+	csrr a0, scause
+	csrr a1, sepc
 
 test_if_asynchronous:
-	srli a2, a0, __riscv_xlen - 1		/* MSB of mcause is 1 if handing an asynchronous interrupt - shift to LSB to clear other bits. */
+	srli a2, a0, __riscv_xlen - 1		/* MSB of scause is 1 if handing an asynchronous interrupt - shift to LSB to clear other bits. */
 	beq a2, x0, handle_synchronous		/* Branch past interrupt handing if not asynchronous. */
 	store_x a1, 0( sp )					/* Asynch so save unmodified exception return address. */
 
 handle_asynchronous:
 
-#if( portasmHAS_CLINT != 0 )
+#if( portasmHAS_CLINT != 0) /* If there is a CLINT then the mtimer is used to generate the tick interrupt. */
 
-	test_if_mtimer:						/* If there is a CLINT then the mtimer is used to generate the tick interrupt. */
+	test_if_mtimer:						
 
 		addi t0, x0, 1
 
@@ -195,17 +195,52 @@ handle_asynchronous:
 
 		#endif /* __riscv_xlen == 64 */
 
-		load_x sp, xISRStackTop			/* Switch to ISR stack before function call. */
-		jal xTaskIncrementTick
-		beqz a0, processed_source		/* Don't switch context if incrementing tick didn't unblock a task. */
-		jal vTaskSwitchContext
-		j processed_source
+    load_x sp, xISRStackTop			/* Switch to ISR stack before function call. */
+    jal xTaskIncrementTick
+    beqz a0, processed_source		/* Don't switch context if incrementing tick didn't unblock a task. */
+    jal vTaskSwitchContext
+    j processed_source
 
-	test_if_external_interrupt:			/* If there is a CLINT and the mtimer interrupt is not pending then check to see if an external interrupt is pending. */
-		addi t1, t1, 4					/* 0x80000007 + 4 = 0x8000000b == Machine external interrupt. */
-		bne a0, t1, as_yet_unhandled	/* Something as yet unhandled. */
+    test_if_external_interrupt:			/* If there is a CLINT and the mtimer interrupt is not pending then check to see if an external interrupt is pending. */
+        addi t1, t1, 4					/* 0x80000007 + 4 = 0x8000000b == Machine external interrupt. */
+        bne a0, t1, as_yet_unhandled	/* Something as yet unhandled. */
 
-#endif /* portasmHAS_CLINT */
+#elif (configSBI != 0)
+
+    addi t0, x0, 1
+    slli t0, t0, __riscv_xlen - 1   /* LSB is already set, shift into MSB.  Shift 31 on 32-bit or 63 on 64-bit cores. */
+    
+    test_if_software_interrupt:	
+        add t1, t0, 0x1    
+        bne a0, t1, test_if_stimer	
+        csrc sip, 0x2		
+        load_x sp, xISRStackTop			
+        jal vTaskSwitchContext
+        j processed_source
+
+    test_if_stimer:
+        addi t1, t0, 5					/* 0x8000[]0005 == sueprvisor timer interrupt. */
+        bne a0, t1, test_if_external_interrupt
+
+    csrr t1, time
+    ld a0, uxTimerIncrementsForOneTick 
+    /* ecall to sbi_set_timer */
+    add a0, a0, t1
+    li a6, SBI_SET_TIMER_FID
+    li a7, SBI_EXTID_TIME
+    ecall
+
+    load_x sp, xISRStackTop			/* Switch to ISR stack before function call. */
+    jal xTaskIncrementTick
+    beqz a0, processed_source		/* Don't switch context if incrementing tick didn't unblock a task. */
+    jal vTaskSwitchContext
+    j processed_source
+
+    test_if_external_interrupt:		
+        addi t1, t0, 9					
+        bne a0, t1, as_yet_unhandled	/* Something as yet unhandled. */
+
+#endif
 
 	load_x sp, xISRStackTop				/* Switch to ISR stack before function call. */
 	jal portasmHANDLE_INTERRUPT			/* Jump to the interrupt handler if there is no CLINT or if there is a CLINT and it has been determined that an external interrupt is pending. */
@@ -223,13 +258,13 @@ test_if_environment_call:
 	j processed_source
 
 is_exception:
-	csrr t0, mcause						/* For viewing in the debugger only. */
-	csrr t1, mepc						/* For viewing in the debugger only */
-	csrr t2, mstatus
+	csrr t0, scause						/* For viewing in the debugger only. */
+	csrr t1, sepc						/* For viewing in the debugger only */
+	csrr t2, sstatus
 	j is_exception						/* No other exceptions handled yet. */
 
 as_yet_unhandled:
-	csrr t0, mcause						/* For viewing in the debugger only. */
+	csrr t0, scause						/* For viewing in the debugger only. */
 	j as_yet_unhandled
 
 processed_source:
@@ -238,13 +273,13 @@ processed_source:
 
 	/* Load mret with the address of the next instruction in the task to run next. */
 	load_x t0, 0( sp )
-	csrw mepc, t0
+	csrw sepc, t0
 
 	portasmRESTORE_ADDITIONAL_REGISTERS	/* Defined in freertos_risc_v_chip_specific_extensions.h to restore any registers unique to the RISC-V implementation. */
 
-	/* Load mstatus with the interrupt enable bits used by the task. */
+	/* Load sstatus with the interrupt enable bits used by the task. */
 	load_x  t0, 29 * portWORD_SIZE( sp )
-	csrw mstatus, t0						/* Required for MPIE bit. */
+	csrw sstatus, t0						/* Required for MPIE bit. */
 
 	load_x  x1, 1 * portWORD_SIZE( sp )
 	load_x  x5, 2 * portWORD_SIZE( sp )		/* t0 */
@@ -276,7 +311,7 @@ processed_source:
 	load_x  x31, 28 * portWORD_SIZE( sp )	/* t6 */
 	addi sp, sp, portCONTEXT_SIZE
 
-	mret
+	sret
 	.endfunc
 /*-----------------------------------------------------------*/
 
@@ -284,12 +319,12 @@ processed_source:
 .func
 xPortStartFirstTask:
 
-#if( portasmHAS_CLINT != 0 )
+#if( portasmHAS_CLINT != 0 || configSBI != 0)
 	/* If there is a clint then interrupts can branch directly to the FreeRTOS
 	trap handler.  Otherwise the interrupt controller will need to be configured
 	outside of this file. */
 	la t0, freertos_risc_v_trap_handler
-	csrw mtvec, t0
+	csrw stvec, t0
 #endif /* portasmHAS_CLILNT */
 
 	load_x  sp, pxCurrentTCB			/* Load pxCurrentTCB. */
@@ -299,9 +334,9 @@ xPortStartFirstTask:
 
 	portasmRESTORE_ADDITIONAL_REGISTERS	/* Defined in freertos_risc_v_chip_specific_extensions.h to restore any registers unique to the RISC-V implementation. */
 
-	load_x  t0, 29 * portWORD_SIZE( sp )	/* mstatus */
+	load_x  t0, 29 * portWORD_SIZE( sp )	/* sstatus */
 	addi t0, t0, 0x08						/* Set MIE bit so the first task starts with interrupts enabled - required as returns with ret not eret. */
-	csrrw  x0, mstatus, t0					/* Interrupts enabled from here! */
+	csrrw  x0, sstatus, t0					/* Interrupts enabled from here! */
 
 	load_x  x5, 2 * portWORD_SIZE( sp )		/* t0 */
 	load_x  x6, 3 * portWORD_SIZE( sp )		/* t1 */
@@ -365,7 +400,7 @@ xPortStartFirstTask:
  * where the global and thread pointers are currently assumed to be constant so
  * are not saved:
  *
- * mstatus
+ * sstatus
  * x31
  * x30
  * x29
@@ -401,13 +436,13 @@ xPortStartFirstTask:
 .func
 pxPortInitialiseStack:
 
-	csrr t0, mstatus					/* Obtain current mstatus value. */
-	addi t1, x0, 0x188					/* Generate the value 0x1880, which are the MPIE and MPP bits to set in mstatus. */
+	csrr t0, sstatus					/* Obtain current sstatus value. */
+	addi t1, x0, 0x12					/* Generate the value 0x120, which are the SPIE and MSPP bits to set in sstatus. */
 	slli t1, t1, 4
-	or t0, t0, t1						/* Set MPIE and MPP bits in mstatus value. */
+	or t0, t0, t1						/* Set SPIE and SPP bits in sstatus value. */
 
 	addi a0, a0, -portWORD_SIZE
-	store_x t0, 0(a0)					/* mstatus onto the stack. */
+	store_x t0, 0(a0)					/* sstatus onto the stack. */
 	addi a0, a0, -(22 * portWORD_SIZE)	/* Space for registers x11-x31. */
 	store_x a2, 0(a0)					/* Task parameters (pvParameters parameter) goes into register X10/a0 on the stack. */
 	addi a0, a0, -(6 * portWORD_SIZE)	/* Space for registers x5-x9. */

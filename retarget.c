@@ -94,14 +94,12 @@ int _isatty(int fd)
 
 void* _sbrk(int increment)
 {
-    extern char _end; // From linker script
-    static char* heap_end = &_end;
+    extern char __heap_end; // From linker script
+    static char* heap_end = &__heap_end;
 
     char* current_heap_end = heap_end;
     heap_end += increment;
     return current_heap_end;
-
-    return NULL;
 }
 
 void _exit(int return_value)
@@ -124,28 +122,12 @@ int _kill(int pid, int sig)
     return -1;
 }
 
-static void init_tls(){
+int hart_id;
+extern int main();
+void _init(int _hart_id){
 
-    register void* tp asm("tp");
-    extern uint8_t _tdata_start, _tdata_end;
-    extern uint8_t _tbss_start, _tbss_end;
-
-    size_t tdata_size = &_tdata_end - &_tdata_start;
-    memcpy(tp, &_tdata_start, tdata_size);
-    size_t tbss_size = &_tbss_end - &_tbss_start;
-    memset(tp + tdata_size, 0, tbss_size);
-}
-
-extern int main(int);
-
-void _init(int hart_id){
-
-    init_tls();
-    uart8250_init(VIRT_UART16550_ADDR, VIRT_UART_SHIFTREG_ADDR,
-			     VIRT_UART_BAUDRATE, 0, 1);
-    //sifive_uart_init(SIFIVE_U_UART0_ADDR, SIFIVE_U_PERIPH_CLK,
-	//			115200);
-    int ret = main(hart_id);
+    hart_id = _hart_id;
+    int ret = main();
     _exit(ret);
 
 }

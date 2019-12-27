@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <csrs.h>
+#include <stddef.h>
 
 #define PLIC_BASE   (0xc000000)
 #define PLIC_HART_BASE   (PLIC_BASE+0x200000)
@@ -52,12 +52,10 @@ typedef struct {
 } plic_hart_t;
 
 extern volatile plic_global_t * const plic_global;
-extern volatile __thread plic_hart_t *plic_hart;
+extern volatile plic_hart_t *plic_hart;
 
 void plic_init();
-void plic_handle();
+void plic_register(unsigned long id, void (*handler)());
 void plic_enable_interrupt(int cntxt, int int_id, bool en);
 void plic_set_prio(int int_id, int prio);
-void plic_probe();
-
 #endif /* __PLIC_H__ */

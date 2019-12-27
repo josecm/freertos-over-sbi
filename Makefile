@@ -3,11 +3,10 @@ TARGET := freertos-riscv
 LD_FILE:=linker.ld
 
 SRCS:=
-SRCS+=$(wildcard ./Source/*.c)
-SRCS+=$(wildcard ./Source/*.S)
+SRCS+=$(wildcard ./Source/*.c) $(wildcard ./Source/*.S)
 SRCS+=$(wildcard ./Source/portable/GCC/RISC-V/*.[c,S])
 SRCS+=./Source/portable/MemMang/heap_4.c
-SRCS+=main.c retarget.c sbi.c uart8250.c boot.S
+SRCS+=$(wildcard ./*.c) $(wildcard ./*.S)
 
 LIBS:=
 
@@ -41,12 +40,12 @@ DIRS+=$(BUILD_DIRS)
 DEPS:=$(patsubst %.o, %.d, $(OBJS))
 DIRS+=$(patsubst %/, %, $(sort $(dir $(DEPS))))
 
-GENERIC_FLAGS:= -march=rv64g -mabi=lp64d -g3\
+GENERIC_FLAGS:= --static  -march=rv64g -mabi=lp64d -g3 --specs=nano.specs\
 	$(addprefix -I, $(sort $(dir $(INCS)))) 
 ASFLAGS:=$(GENERIC_FLAGS) 
 CPPFLAGS:=$(GENERIC_FLAGS)
-CFLAGS:=$(GENERIC_FLAGS) -mcmodel=medany -O3
-LDFLAGS:=$(GENERIC_FLAGS) -nostartfiles --static 
+CFLAGS:=$(GENERIC_FLAGS) -mcmodel=medany -O2
+LDFLAGS:=$(GENERIC_FLAGS) -nostartfiles  
 
 
 all: $(TARGET).bin
@@ -76,5 +75,6 @@ $(DIRS):
 
 clean:
 	rm -rf ./build
+	rm *.asm *.bin *.elf *.lst
 
 .PHONY: all clean
